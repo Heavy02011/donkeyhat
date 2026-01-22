@@ -462,7 +462,7 @@ POST_TRANSFORMATIONS = []
 # RECORDING & LOGGING
 
 # Automatically record data when throttle is > 0 (Standard training data collection).
-# AUTO_RECORD_ON_THROTTLE = True
+AUTO_RECORD_ON_THROTTLE = False
 
 # Record data even when the AI is driving (Careful: don't train on this data!).
 # RECORD_DURING_AI = False
