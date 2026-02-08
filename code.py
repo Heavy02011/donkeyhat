@@ -241,29 +241,29 @@ def main():
 
             # if data is received, check if it is the end of a stream
             if byte == b'\r':
-                command = datastr.strip()
-                datastr = ''
-                handle_command(command)
                 data = bytearray()
                 break
 
             data[len(data):len(data)] = byte
             datastr = ''.join([chr(c) for c in data]).strip()
 
-            # if we make it here, there is serial data from the previous step
-            if len(datastr) >= 10:
-                steering_val = steering.value
-                throttle_val = throttle.value
-                try:
-                    steering_val = int(datastr[:4])
-                    throttle_val = int(datastr[-4:])
-                except ValueError:
-                    None
+        # check for servo data after reading all available bytes
+        if len(datastr) >= 10:
+            steering_val = steering.value
+            throttle_val = throttle.value
+            try:
+                steering_val = int(datastr[:4])
+                throttle_val = int(datastr[-4:])
+            except ValueError:
+                None
 
-                data = bytearray()
-                datastr = ''
-                got_data = True
- #               print("Set: steering=%i, throttle=%i" % (steering_val, throttle_val))
+            data = bytearray()
+            datastr = ''
+            got_data = True
+        elif len(datastr) > 0 and datastr[0].isalpha():
+            handle_command(datastr.strip())
+            data = bytearray()
+            datastr = ''
         if got_data:
             print("Serial control")
             # Set the servo for serial data (received)
