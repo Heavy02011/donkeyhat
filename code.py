@@ -249,17 +249,14 @@ def main():
 
         # check for servo data after reading all available bytes
         if len(datastr) >= 10:
-            steering_val = steering.value
-            throttle_val = throttle.value
             try:
                 steering_val = int(datastr[:4])
                 throttle_val = int(datastr[-4:])
+                got_data = True
             except ValueError:
-                None
-
+                pass
             data = bytearray()
             datastr = ''
-            got_data = True
         elif len(datastr) > 0 and datastr[0].isalpha():
             handle_command(datastr.strip())
             data = bytearray()
