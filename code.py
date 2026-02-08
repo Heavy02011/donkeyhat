@@ -1,8 +1,8 @@
 # Donkey Car Driver for 2040-based boards such as the Raspberry Pi Pico and KB2040
 #
 # Notes:
-#   This is to be run using CircuitPython 9.x
-#   Last Updated: 7/07/2024
+#   This is to be run using CircuitPython 10.x
+#   Last Updated: 1/21/2026
 
 import time
 import board
@@ -19,6 +19,7 @@ USB_SERIAL = False
 SMOOTHING_INTERVAL_IN_S = 0.025
 ACCEL_RATE = 10
 USE_QUADRATURE = False  # Set to False to use regular encoder
+ESTOP_THRESHOLD = 1700  # CH3 above this value triggers e-stop
 
 
 # Pin assignments
@@ -64,21 +65,39 @@ def servo_duty_cycle(pulse_ms, frequency=60):
 
 def state_changed(control):
     """
-    Reads the RC channel and smoothes value
+    Reads the RC channel and returns smoothed value.
+    Uses median filtering for noise rejection and exponential smoothing for responsiveness.
     """
     control.channel.pause()
-    for i in range(0, len(control.channel)):
+    valid_values = []
+    for i in range(len(control.channel)):
         val = control.channel[i]
-        # prevent ranges outside of control space
-        if val < 1000 or val > 2000:
-            continue
-        # set new value
-        control.value = (control.value + val) / 2
-        if control.value > 1475 and control.value < 1525:
-            control.value = 1500
+        # Only accept values in valid RC range
+        if 900 <= val <= 2100:
+            valid_values.append(val)
 
     control.channel.clear()
     control.channel.resume()
+
+    if not valid_values:
+        return
+
+    # Use median of valid values to reject outliers/glitches
+    valid_values.sort()
+    median_val = valid_values[len(valid_values) // 2]
+
+    # Clamp median to valid RC range before smoothing
+    median_val = max(1000, min(2000, median_val))
+
+    # Exponential smoothing: 0.7 weight on new value for responsiveness
+    control.value = control.value * 0.3 + median_val * 0.7
+
+    # Clamp final value to valid range
+    control.value = max(1000, min(2000, control.value))
+
+    # Apply deadband around center
+    if 1475 < control.value < 1525:
+        control.value = 1500
 
 class Control:
     """
@@ -90,7 +109,8 @@ class Control:
         self.servo = servo
         self.channel = channel
         self.value = value
-        self.servo.duty_cycle = servo_duty_cycle(value)
+        if servo is not None:
+            self.servo.duty_cycle = servo_duty_cycle(value)
 
 # set up serial UART to Raspberry Pi
 uart = busio.UART(board.TX, board.RX, baudrate=115200, timeout=0.001)
@@ -107,17 +127,20 @@ mode_channel = PulseIn(RC3, maxlen=64, idle_state=0)
 # setup Control objects.  1500 pulse is off and center steering
 steering = Control("Steering", steering_pwm, steering_channel, 1500)
 throttle = Control("Throttle", throttle_pwm, throttle_channel, 1500)
+mode = Control("Mode", None, mode_channel, 1500)  # CH3 for e-stop, no servo output
 
 last_update = time.monotonic()
 continuous_mode = False
 continuous_delay = 0
+estop_active = False
 
 position1 = 0
 position2 = 0
 
 def main():
-    global last_update, continuous_mode, continuous_delay, position1, position2
+    global last_update, continuous_mode, continuous_delay, position1, position2, estop_active
     last_toggle_time = time.monotonic()
+    last_servo_update = time.monotonic()
     interval = 1  # Seconds
     data = bytearray()
     datastr = ''
@@ -153,8 +176,6 @@ def main():
             last_state1 = current_state1
             last_state2 = current_state2
 
-        time.sleep(0.01)  # Debounce delay
-
         if continuous_mode and (current_time - last_toggle_time >= continuous_delay / 1000.0):
             uart.write(b"%i, %i, %i, %i; %i, %i\r\n" % (
                 int(steering.value), int(throttle.value),
@@ -182,6 +203,23 @@ def main():
 
         if len(steering.channel) != 0:
             state_changed(steering)
+
+        # Check CH3 for e-stop
+        if len(mode.channel) != 0:
+            state_changed(mode)
+
+        # E-stop: if CH3 is high, force throttle to neutral
+        if mode.value > ESTOP_THRESHOLD:
+            if not estop_active:
+                estop_active = True
+                color = (255, 0, 0)  # Red for e-stop
+                print("E-STOP ACTIVE")
+            throttle.value = 1500
+            throttle_val = 1500
+        elif estop_active:
+            estop_active = False
+            color = (0, 0, 255)  # Back to blue
+            print("E-STOP RELEASED")
 
         if USB_SERIAL:
             # simulator USB
@@ -229,14 +267,23 @@ def main():
         if got_data:
             print("Serial control")
             # Set the servo for serial data (received)
+            # E-stop overrides throttle even in serial mode
+            if estop_active:
+                throttle_val = 1500
             steering.servo.duty_cycle = servo_duty_cycle(steering_val)
             throttle.servo.duty_cycle = servo_duty_cycle(throttle_val)
-            last_input = time.monotonic()  # Only update here when serial data is received
-        elif time.monotonic() > (last_input + 0.1):  # Timeout to switch back to RC control
-            print("RC control")
-            # Set the servo for RC control
-            steering.servo.duty_cycle = servo_duty_cycle(steering.value)
-            throttle.servo.duty_cycle = servo_duty_cycle(throttle.value)
+            last_input = time.monotonic()
+        elif current_time > (last_input + 0.1):  # Timeout to switch back to RC control
+            # Update servos more frequently to reduce jitter
+            if current_time - last_servo_update >= 0.01:  # 100Hz servo update rate
+                print("RC control")
+                steering.servo.duty_cycle = servo_duty_cycle(steering.value)
+                # E-stop forces throttle to neutral
+                if estop_active:
+                    throttle.servo.duty_cycle = servo_duty_cycle(1500)
+                else:
+                    throttle.servo.duty_cycle = servo_duty_cycle(throttle.value)
+                last_servo_update = current_time
 
 
 def handle_command(command):
