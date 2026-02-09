@@ -243,8 +243,17 @@ def main():
             if byte == b'\r':
                 command = datastr.strip()
                 datastr = ''
-                handle_command(command)
                 data = bytearray()
+                # Check if this is servo PWM data (e.g. "1500, 1500") or a command
+                if len(command) >= 10 and command[0].isdigit():
+                    try:
+                        steering_val = int(command[:4])
+                        throttle_val = int(command[-4:])
+                        got_data = True
+                    except ValueError:
+                        handle_command(command)
+                elif command:
+                    handle_command(command)
                 break
 
             data[len(data):len(data)] = byte
