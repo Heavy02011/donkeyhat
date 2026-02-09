@@ -94,7 +94,7 @@ If the fix above doesn't fully resolve the issue, work through these diagnostics
 
 ```bash
 # On the Raspberry Pi, test sending servo commands directly:
-echo -ne "1500,1500\r" > /dev/ttyAMA0
+echo -ne "1500, 1500\r" > /dev/ttyAMA0
 
 # Monitor what the RP2040 sends back:
 cat /dev/ttyAMA0
@@ -177,11 +177,11 @@ Then monitor the RP2040's USB console (via `screen /dev/ttyACM0 115200` or Mu ed
 
 ```bash
 # Test steering independently via calibration commands:
-echo -ne "1000,1500\r" > /dev/ttyAMA0   # Steering right
+echo -ne "1000, 1500\r" > /dev/ttyAMA0   # Steering right
 sleep 1
-echo -ne "1500,1500\r" > /dev/ttyAMA0   # Steering center
+echo -ne "1500, 1500\r" > /dev/ttyAMA0   # Steering center
 sleep 1
-echo -ne "2000,1500\r" > /dev/ttyAMA0   # Steering left
+echo -ne "2000, 1500\r" > /dev/ttyAMA0   # Steering left
 ```
 
 If the servo responds to these but not to `manage.py drive`, the issue is in the serial parsing (fixed above).
